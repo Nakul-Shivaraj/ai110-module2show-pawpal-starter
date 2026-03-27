@@ -84,3 +84,13 @@ The preferred_time field is a plain string with no validation. A malformed entry
 **c. Key takeaway**
 
 The lead architect role means deciding what AI suggestions to accept, modify, or reject — not just accepting whatever is generated. AI accelerated every phase of this project, but every structural decision (Scheduler takes Owner directly, conflict detection warns rather than drops, explicit loop over itertools) required a human judgment call that AI could not make on its own. The quality of the final system reflects those decisions more than the speed at which the code was produced.
+
+## Multi-Model Prompt Comparison
+
+**Comparison and judgment**
+
+Claude's solution was more modular and more Pythonic on two counts: it used dataclasses.replace() which is the stdlib-correct way to copy a dataclass with targeted changes, and it extracted the date math into a named helper that makes the intent readable without needing a comment. Gemini's manual constructor approach works but is fragile — it would break silently if Task gained a new field with no default. Gemini also missed the completed=False reset, which is a real behavioral bug: a task that was marked done last week would stay done after rescheduling. Neither solution was used verbatim; Claude's structure was kept and the date math was verified against the existing next_occurrence() logic already in pawpal_system.py.
+
+**Key takeaway**
+
+Claude defaulted to stdlib idioms (dataclasses.replace) while Gemini defaulted to explicit reconstruction — both produce working code, but Claude's approach is more resilient to future changes in the data model.
