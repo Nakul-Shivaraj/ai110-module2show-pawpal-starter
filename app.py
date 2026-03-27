@@ -136,21 +136,45 @@ with col_save:
         owner.save_to_json(DATA_FILE)
         st.success(f"💾 Saved to `{DATA_FILE}`")
 
-# Task table
+# Priority legend
+with st.expander("🎨 Priority legend", expanded=False):
+    for level, label in sorted(PRIORITY_LABELS.items(), reverse=True):
+        cat_note = "medication gets up to 1.5x category bonus"
+        st.markdown(f"{label} — priority **{level}**/5  ·  {cat_note if level == 5 else ''}")
+
+# Task table with weighted score column
 if st.session_state.tasks:
     st.write("**Current tasks:**")
+
+    _owner = Owner(owner_name, owner_email, available_hours)
+    _pet   = Pet(pet_name, species, int(pet_age), health_notes)
+    for t in st.session_state.tasks:
+        _pet.add_task(Task(
+            name=t["title"], category=t["category"],
+            duration_minutes=t["duration_minutes"], priority=t["priority"],
+            recurrence=t["recurrence"], preferred_time=t.get("preferred_time"),
+        ))
+    _owner.add_pet(_pet)
+    _sched = Scheduler(_owner)
+
     display_rows = []
     for t in st.session_state.tasks:
-        icon = CATEGORY_ICONS.get(t["category"], "📌")
+        icon  = CATEGORY_ICONS.get(t["category"], "📌")
+        label = PRIORITY_LABELS.get(t["priority"], str(t["priority"]))
+        task_obj = next((tk for tk in _pet.get_tasks() if tk.name == t["title"]), None)
+        score_str = f"{_sched.weighted_score(task_obj):.2f}" if task_obj else "—"
         display_rows.append({
-            "Task":       f"{icon} {t['title']}",
-            "Category":   t["category"],
-            "Duration":   f"{t['duration_minutes']} min",
-            "Priority":   PRIORITY_LABELS.get(t["priority"], t["priority"]),
-            "Recurrence": t["recurrence"],
-            "Time":       t["preferred_time"] or "—",
+            "Priority":      label,
+            "Task":          f"{icon} {t['title']}",
+            "Category":      t["category"],
+            "Duration":      f"{t['duration_minutes']} min",
+            "Recurrence":    t["recurrence"],
+            "Time":          t["preferred_time"] or "—",
+            "Urgency score": score_str,
         })
     st.table(display_rows)
+    st.caption("Urgency score = priority x category weight x due-date bonus. "
+               "Higher score = scheduled first when budget is tight.")
 else:
     st.info("No tasks yet. Add one above.")
 
@@ -265,15 +289,36 @@ if st.button("🗓️ Generate schedule", type="primary"):
     if next_slot:
         st.caption(f"💡 Next free 30-min slot: **{next_slot}**")
 
-    # Schedule table
+    # Sort mode toggle
+    sort_mode = st.radio(
+        "Display order",
+        ["⏰ Time-first", "🔴 Priority-first"],
+        horizontal=True,
+        help="Time-first: read your day in order. Priority-first: most urgent tasks at the top."
+    )
+    display_plan = plan if sort_mode == "⏰ Time-first" else scheduler.sort_by_priority(plan)
+
+    # Priority distribution summary
     st.markdown("### Today's Schedule")
-    st.caption("Sorted by time — priority determined which tasks made the cut.")
-    for i, (_, task) in enumerate(plan, 1):
-        icon         = CATEGORY_ICONS.get(task.category, "📌")
-        label        = PRIORITY_LABELS.get(task.priority, "")
-        time_str     = task.preferred_time or "anytime"
+    pri_counts = {5: 0, 4: 0, 3: 0, 2: 0, 1: 0}
+    for _, task in display_plan:
+        pri_counts[task.priority] += 1
+    bar_cols = st.columns(5)
+    for idx, (p, lbl) in enumerate([(5,"🔴 Critical"),(4,"🟠 High"),(3,"🟡 Medium"),(2,"🟢 Low"),(1,"⚪ Minimal")]):
+        bar_cols[idx].metric(lbl, pri_counts[p])
+
+    caption = "Sorted chronologically — priority determined which tasks made the cut." \
+              if sort_mode == "⏰ Time-first" else \
+              "Sorted by urgency — highest priority tasks shown first."
+    st.caption(caption)
+
+    for i, (_, task) in enumerate(display_plan, 1):
+        icon          = CATEGORY_ICONS.get(task.category, "📌")
+        label         = PRIORITY_LABELS.get(task.priority, "")
+        time_str      = task.preferred_time or "anytime"
+        score         = scheduler.weighted_score(task)
         is_conflicted = any(task.name in w for w in conflicts)
-        col_a, col_b = st.columns([3, 1])
+        col_a, col_b  = st.columns([3, 1])
         with col_a:
             renderer = st.warning if is_conflicted else st.success
             renderer(f"**{i}. {icon} {task.name}** @ {time_str}"
@@ -281,6 +326,7 @@ if st.button("🗓️ Generate schedule", type="primary"):
                      f"{label} · {task.duration_minutes} min · {task.recurrence}")
         with col_b:
             st.caption(f"Due: {task.due_date}")
+            st.caption(f"Score: {score}")
 
     if dropped:
         st.markdown("### 🚫 Dropped Tasks")

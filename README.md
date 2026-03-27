@@ -171,3 +171,46 @@ Three methods handle the full persistence lifecycle:
  
 Agent Mode was used to plan the persistence strategy — it proposed both the marshmallow approach and the custom dict approach, then outlined the tradeoffs. The custom approach was chosen. Agent Mode then scaffolded the three methods and the `load_state()` / `save_state()` helpers in `app.py`, which were reviewed and adjusted to handle the species dropdown index correctly on restore and to add the `st.toast` confirmation on startup.
  
+## 🔴 Challenge 3: Advanced Priority Scheduling and UI
+ 
+Priority-based scheduling is the core of PawPal+'s decision engine. Here's
+how it works end to end:
+ 
+### Priority levels
+ 
+| Emoji | Label | Value |
+|---|---|---|
+| 🔴 | Critical | 5 |
+| 🟠 | High | 4 |
+| 🟡 | Medium | 3 |
+| 🟢 | Low | 2 |
+| ⚪ | Minimal | 1 |
+ 
+### Two-pass scheduling
+ 
+The scheduler uses priority in two distinct ways:
+ 
+1. **Selection pass** (`sort_by_priority`) — tasks are ranked highest-first
+   before the time budget is applied. A P5 medication always makes the cut before a P3 enrichment, regardless of what time they're scheduled.
+ 
+2. **Display pass** (`sort_by_time`) — once the plan is finalized, tasks are re-sorted chronologically so the output reads like a real day.
+ 
+### Urgency score (weighted prioritization)
+ 
+The task table shows a computed **urgency score** that goes beyond the raw 1–5 integer:
+ 
+```
+score = priority × category_weight × recency_bonus
+```
+ 
+An overdue P3 medication (score 6.75) correctly outranks an on-time P5 walk (score 6.0). This is surfaced in the UI task table so owners can see at a glance which tasks are most time-sensitive.
+ 
+### Color-coding in the UI
+ 
+Every task in the schedule display is color-coded:
+- `st.success` (green) — task scheduled with no conflicts
+- `st.warning` (yellow) — task has a time overlap with another task
+- `st.error` (red) — task dropped due to time budget
+ 
+The task table also shows emoji priority labels (🔴🟠🟡🟢⚪) on every row
+so priority is visible before a schedule is even generated.
