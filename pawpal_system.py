@@ -190,6 +190,67 @@ class Owner:
         except ValueError:
             return 480  # default: 8 hours if parsing fails
 
+    def to_dict(self) -> dict:
+        """Serialize the Owner and all nested Pets and Tasks to a plain dict."""
+        return {
+            "name":            self.name,
+            "email":           self.email,
+            "available_hours": self.available_hours,
+            "pets": [
+                {
+                    "name":         pet.name,
+                    "species":      pet.species,
+                    "age":          pet.age,
+                    "health_notes": pet.health_notes,
+                    "tasks":        [t.to_dict() for t in pet.get_tasks()],
+                }
+                for pet in self.pets
+            ],
+        }
+
+    def save_to_json(self, filepath: str = "data.json") -> None:
+        """Persist the full Owner state (pets + tasks) to a JSON file."""
+        import json, pathlib
+        pathlib.Path(filepath).write_text(
+            json.dumps(self.to_dict(), indent=2), encoding="utf-8"
+        )
+
+    @classmethod
+    def load_from_json(cls, filepath: str = "data.json") -> "Owner":
+        """
+        Reconstruct an Owner (with all Pets and Tasks) from a JSON file.
+        Raises FileNotFoundError if the file does not exist yet.
+        """
+        import json, pathlib
+        from datetime import date
+        raw = json.loads(pathlib.Path(filepath).read_text(encoding="utf-8"))
+        owner = cls(
+            name=raw["name"],
+            email=raw["email"],
+            available_hours=raw["available_hours"],
+        )
+        for p in raw.get("pets", []):
+            pet = Pet(
+                name=p["name"],
+                species=p["species"],
+                age=p["age"],
+                health_notes=p.get("health_notes", ""),
+            )
+            for t in p.get("tasks", []):
+                pet.add_task(Task(
+                    name=t["name"],
+                    category=t["category"],
+                    duration_minutes=t["duration_minutes"],
+                    priority=t["priority"],
+                    recurrence=t.get("recurrence", "daily"),
+                    preferred_time=t.get("preferred_time"),
+                    completed=t.get("completed", False),
+                    task_id=t["task_id"],
+                    due_date=date.fromisoformat(t["due_date"]),
+                ))
+            owner.add_pet(pet)
+        return owner
+
     def __str__(self) -> str:
         pet_names = ", ".join(p.name for p in self.pets) or "none"
         return (
@@ -467,3 +528,87 @@ class Scheduler:
     def sort_by_weighted_score(self, tasks: list) -> list:
         """Sort (pet_name, Task) pairs by weighted_score descending."""
         return sorted(tasks, key=lambda pair: self.weighted_score(pair[1]), reverse=True)
+
+
+# ---------------------------------------------------------------------------
+# Persistence helpers (module-level so app.py can import them directly)
+# ---------------------------------------------------------------------------
+
+import json
+import os
+from pathlib import Path
+
+DATA_FILE = Path("data.json")
+
+
+def save_owner(owner: "Owner", path: Path = DATA_FILE) -> None:
+    """
+    Serialize the Owner (and all nested Pets + Tasks) to JSON.
+    Uses each class's existing to_dict() / plain attributes — no extra deps.
+    Schema: { owner: {..., pets: [{..., tasks: [{...}]}] } }
+    """
+    def pet_to_dict(pet):
+        return {
+            "name":         pet.name,
+            "species":      pet.species,
+            "age":          pet.age,
+            "health_notes": pet.health_notes,
+            "tasks":        [t.to_dict() for t in pet.tasks],
+        }
+
+    payload = {
+        "owner": {
+            "name":            owner.name,
+            "email":           owner.email,
+            "available_hours": owner.available_hours,
+            "pets":            [pet_to_dict(p) for p in owner.pets],
+        }
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, indent=2)
+
+
+def load_owner(path: Path = DATA_FILE) -> "Owner":
+    """
+    Deserialize an Owner from JSON produced by save_owner().
+    Reconstructs full Task and Pet objects including due_date parsing.
+    Raises FileNotFoundError if path doesn't exist.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+
+    od = payload["owner"]
+    owner = Owner(
+        name=od["name"],
+        email=od["email"],
+        available_hours=od["available_hours"],
+    )
+
+    for pd in od.get("pets", []):
+        pet = Pet(
+            name=pd["name"],
+            species=pd["species"],
+            age=pd["age"],
+            health_notes=pd.get("health_notes", ""),
+        )
+        for td in pd.get("tasks", []):
+            task = Task(
+                name=td["name"],
+                category=td["category"],
+                duration_minutes=td["duration_minutes"],
+                priority=td["priority"],
+                recurrence=td.get("recurrence", "daily"),
+                preferred_time=td.get("preferred_time"),
+                completed=td.get("completed", False),
+                task_id=td["task_id"],
+                due_date=date.fromisoformat(td["due_date"]),
+            )
+            pet.tasks.append(task)   # append directly — IDs already set
+        owner.add_pet(pet)
+
+    return owner
+
+
+def data_file_exists(path: Path = DATA_FILE) -> bool:
+    """Return True if a saved data file exists at path."""
+    return path.exists()

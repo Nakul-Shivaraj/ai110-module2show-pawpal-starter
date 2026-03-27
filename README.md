@@ -106,6 +106,9 @@ See uml_final.png for the full class diagram.
 
 ## 🧠 Optional Extensions
 
+## Challenge 1:
+Advanced Algorithmic Capability via Agent Mode
+
 ### Extension 1: Next available slot (`find_next_slot`)
 
 Given a task duration in minutes, the scheduler scans the owner's available window minute-by-minute and returns the earliest time that fits without overlapping any existing scheduled task.
@@ -140,3 +143,31 @@ ranked = scheduler.sort_by_weighted_score(owner.get_all_tasks())
 ```
 
 **Agent Mode usage:** Agent Mode was used to scaffold both methods — it proposed the interval overlap formula for `find_next_slot` and the multiplicative score structure for `weighted_score`. Both suggestions were reviewed and modified: the slot finder was changed from 30-minute increments to 1-minute steps for precision, and the recency bonus tiers were adjusted after testing showed the original values didn't differentiate overdue tasks strongly enough.
+
+## 💾 Challenge 2: Data Persistence
+PawPal+ remembers your pets and tasks between sessions using a local `data.json` file.
+ 
+### How it works
+
+Three methods handle the full persistence lifecycle:
+ 
+**`Owner.to_dict()`** — recursively serializes the entire object graph (Owner → Pets → Tasks) into a plain Python dict, including `due_date` (as ISO string) and `task_id` (so recurring clones keep their identity across restarts).
+ 
+**`Owner.save_to_json(filepath)`** — writes the dict to disk using `json.dumps`. Called automatically on every "Generate schedule" click, and also available via the manual **💾 Save to file** button.
+ 
+**`Owner.load_from_json(filepath)`** — reads the file, reconstructs `Task` objects (converting `due_date` back with `date.fromisoformat()`), builds `Pet` objects, and returns a fully wired `Owner`. Called once per session on startup.
+ 
+### In the UI
+ 
+- On first load, if `data.json` exists, a toast notification confirms the previous session was restored and all fields pre-fill automatically.
+- The **💾 Save to file** button lets you save manually at any point.
+- Every schedule generation auto-saves silently.
+ 
+### Why custom dict conversion over marshmallow
+ 
+`marshmallow` adds a dependency and schema definition overhead for a data model this small. Since `Task.to_dict()` already existed and `date.fromisoformat()` handles the only non-trivial type, a custom approach keeps the codebase dependency-free and the serialization logic readable inline.
+ 
+### Agent Mode usage
+ 
+Agent Mode was used to plan the persistence strategy — it proposed both the marshmallow approach and the custom dict approach, then outlined the tradeoffs. The custom approach was chosen. Agent Mode then scaffolded the three methods and the `load_state()` / `save_state()` helpers in `app.py`, which were reviewed and adjusted to handle the species dropdown index correctly on restore and to add the `st.toast` confirmation on startup.
+ 
