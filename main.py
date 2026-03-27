@@ -8,6 +8,122 @@ from pawpal_system import Owner, Pet, Task, Scheduler
 
 
 # ---------------------------------------------------------------------------
+# Setup — intentionally add tasks OUT OF ORDER to test sorting
+# ---------------------------------------------------------------------------
+
+owner = Owner("Jordan Rivera", "jordan@pawpal.com", "07:00-20:00")
+
+buddy = Pet("Buddy", "Dog", 4, "Allergic to chicken.")
+luna  = Pet("Luna",  "Cat", 2, "Indoor only.")
+
+# Buddy's tasks — deliberately shuffled times
+buddy.add_task(Task("Evening Walk",   "walk",       45, priority=3, recurrence="daily",  preferred_time="18:00"))
+buddy.add_task(Task("Flea Medication","medication",  5, priority=4, recurrence="weekly", preferred_time="09:00"))
+buddy.add_task(Task("Breakfast",      "feeding",    10, priority=5, recurrence="daily",  preferred_time="08:00"))
+buddy.add_task(Task("Morning Walk",   "walk",       30, priority=5, recurrence="daily",  preferred_time="07:30"))
+
+# Luna's tasks
+luna.add_task(Task("Breakfast",    "feeding",    10, priority=5, recurrence="daily",  preferred_time="08:00"))
+luna.add_task(Task("Puzzle Feeder","enrichment", 20, priority=3, recurrence="daily",  preferred_time="11:00"))
+luna.add_task(Task("Brushing",     "grooming",   15, priority=2, recurrence="weekly", preferred_time="14:00"))
+
+# Mark one task complete to test filtering
+buddy.tasks[2].completed = True   # Breakfast is done
+
+owner.add_pet(buddy)
+owner.add_pet(luna)
+
+scheduler = Scheduler(owner)
+
+DIVIDER = "─" * 56
+
+
+# ---------------------------------------------------------------------------
+# Demo 1: Full schedule (priority → time-sorted output)
+# ---------------------------------------------------------------------------
+
+plan = scheduler.generate_plan()
+
+print()
+print("╔══════════════════════════════════════════════════════╗")
+print("║       🐾  PawPal+ — Today's Schedule                ║")
+print("╚══════════════════════════════════════════════════════╝")
+print(f"  Owner : {owner.name}  |  Budget: {owner.available_minutes()} min")
+print()
+print(f"  {'Time':<8} {'Pet':<8} {'Task':<20} {'Dur':>5}  {'Pri':<5}")
+print(f"  {DIVIDER}")
+for pet_name, task in plan:
+    t = task.preferred_time or "—     "
+    print(f"  {t:<8} {pet_name:<8} {task.name:<20} {task.duration_minutes:>4}m  P{task.priority}")
+
+
+# ---------------------------------------------------------------------------
+# Demo 2: sort_by_time on all tasks (not just due-today)
+# ---------------------------------------------------------------------------
+
+print()
+print(f"  {DIVIDER}")
+print("  📋  All tasks sorted chronologically (sort_by_time)")
+print(f"  {DIVIDER}")
+
+all_pairs = owner.get_all_tasks()
+time_sorted = scheduler.sort_by_time(all_pairs)
+
+for pet_name, task in time_sorted:
+    t = task.preferred_time or "none "
+    done = "✓" if task.completed else " "
+    print(f"  [{done}] {t:<8} {pet_name:<8} {task.name}")
+
+
+# ---------------------------------------------------------------------------
+# Demo 3: filter_tasks — incomplete tasks only
+# ---------------------------------------------------------------------------
+
+print()
+print(f"  {DIVIDER}")
+print("  🔍  Filter: incomplete tasks only")
+print(f"  {DIVIDER}")
+
+incomplete = scheduler.filter_tasks(completed=False)
+for pet_name, task in incomplete:
+    print(f"  • [{pet_name}] {task.name} ({task.category})")
+
+
+# ---------------------------------------------------------------------------
+# Demo 4: filter_tasks — Buddy's tasks only
+# ---------------------------------------------------------------------------
+
+print()
+print(f"  {DIVIDER}")
+print("  🔍  Filter: Buddy's tasks only")
+print(f"  {DIVIDER}")
+
+buddy_tasks = scheduler.filter_tasks(pet_name="Buddy")
+for pet_name, task in buddy_tasks:
+    done = "✓" if task.completed else " "
+    print(f"  [{done}] {task.name:<22} category={task.category}")
+
+
+# ---------------------------------------------------------------------------
+# Demo 5: filter_tasks — walk tasks only (any pet)
+# ---------------------------------------------------------------------------
+
+print()
+print(f"  {DIVIDER}")
+print("  🔍  Filter: category = walk")
+print(f"  {DIVIDER}")
+
+walks = scheduler.filter_tasks(category="walk")
+for pet_name, task in walks:
+    print(f"  • [{pet_name}] {task.name} @ {task.preferred_time or '—'}")
+
+print()
+print("═" * 56)
+print()
+
+
+
+# ---------------------------------------------------------------------------
 # 1. Create Owner
 # ---------------------------------------------------------------------------
 
@@ -191,3 +307,51 @@ def print_schedule(plan: list, scheduler: Scheduler) -> None:
 
 
 print_schedule(plan, scheduler)
+
+# ---------------------------------------------------------------------------
+# Demo 6: Conflict detection — two tasks deliberately at the same time
+# ---------------------------------------------------------------------------
+
+from pawpal_system import Owner, Pet, Task, Scheduler
+
+print()
+print("╔══════════════════════════════════════════════════════╗")
+print("║       ⚠️   Conflict Detection Demo                   ║")
+print("╚══════════════════════════════════════════════════════╝")
+
+conflict_owner = Owner("Sam", "sam@pawpal.com", "07:00-20:00")
+rex   = Pet("Rex",   "Dog", 2)
+kitty = Pet("Kitty", "Cat", 3)
+
+# These two tasks both start at 08:00 and overlap each other
+rex.add_task(Task("Morning Walk",  "walk",    45, priority=5,
+                  recurrence="daily", preferred_time="08:00"))
+rex.add_task(Task("Breakfast",     "feeding", 15, priority=5,
+                  recurrence="daily", preferred_time="08:30"))   # starts inside walk
+
+# These two overlap across pets (08:00 feeding + 08:15 grooming)
+kitty.add_task(Task("Breakfast",   "feeding", 20, priority=5,
+                    recurrence="daily", preferred_time="08:00"))
+kitty.add_task(Task("Grooming",    "grooming", 30, priority=3,
+                    recurrence="daily", preferred_time="08:15")) # starts inside Breakfast
+
+conflict_owner.add_pet(rex)
+conflict_owner.add_pet(kitty)
+
+s = Scheduler(conflict_owner)
+s.generate_plan()
+
+print()
+if s.conflict_warnings:
+    for w in s.conflict_warnings:
+        print(f"  {w}")
+else:
+    print("  No conflicts detected.")
+
+print()
+print("  Full explanation:")
+print()
+for line in s.explain_plan().split("\n"):
+    print(f"  {line}")
+print()
+print("═" * 56)

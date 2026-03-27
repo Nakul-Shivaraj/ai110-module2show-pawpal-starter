@@ -33,13 +33,11 @@ Both changes were deferred to avoid over-engineering the skeleton before any log
 
 **a. Constraints and priorities**
 
-- What constraints does your scheduler consider (for example: time, priority, preferences)?
-- How did you decide which constraints mattered most?
+The scheduler considers three constraints in order: recurrence/due date (only today's tasks are included), priority (highest-priority tasks are accepted first), and time budget (tasks are dropped once the owner's available minutes are exhausted).
 
 **b. Tradeoffs**
 
-- Describe one tradeoff your scheduler makes.
-- Why is that tradeoff reasonable for this scenario?
+The conflict detector warns about overlapping tasks but does not remove them. This keeps the scheduler transparent — an owner who sees a conflict warning can fix it themselves, rather than having the system silently delete a task they asked for. For a planning tool, informing is more appropriate than overriding.
 
 ---
 

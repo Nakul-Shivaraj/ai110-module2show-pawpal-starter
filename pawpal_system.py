@@ -5,7 +5,7 @@ pawpal_system.py: Core logic layer (classes, scheduling, algorithms)
 
 from dataclasses import dataclass, field
 from typing import Optional
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 import uuid
 
 
@@ -23,17 +23,36 @@ class Task:
     preferred_time: Optional[str] = None  # e.g. "08:00"
     completed: bool = False
     task_id: str = field(default_factory=lambda: str(uuid.uuid4())[:8])
+    due_date: date = field(default_factory=date.today)  # defaults to today
 
     def is_due_today(self) -> bool:
-        """Return True if this task should appear in today's plan."""
-        if self.recurrence == "daily":
-            return True
-        if self.recurrence == "weekly":
-            # Treat every Monday as the weekly recurrence day
-            return date.today().weekday() == 0
+        """Return True if this task's due_date matches today and it isn't complete."""
+        if self.completed:
+            return False
+        return self.due_date == date.today()
+
+    def next_occurrence(self) -> "Task":
+        """
+        Return a fresh Task clone due on the next occurrence date.
+        Uses timedelta: daily → today + 1 day, weekly → today + 7 days.
+        Raises ValueError for non-recurring tasks.
+        """
         if self.recurrence == "none":
-            return not self.completed
-        return False
+            raise ValueError(
+                f"Task '{self.name}' is non-recurring — no next occurrence."
+            )
+        delta = timedelta(days=1) if self.recurrence == "daily" else timedelta(weeks=1)
+        return Task(
+            name=self.name,
+            category=self.category,
+            duration_minutes=self.duration_minutes,
+            priority=self.priority,
+            recurrence=self.recurrence,
+            preferred_time=self.preferred_time,
+            completed=False,
+            due_date=date.today() + delta,
+            # task_id is auto-generated — every occurrence is a distinct object
+        )
 
     def to_dict(self) -> dict:
         """Serialize the task to a plain dictionary (for display / storage)."""
@@ -46,6 +65,7 @@ class Task:
             "recurrence":       self.recurrence,
             "preferred_time":   self.preferred_time,
             "completed":        self.completed,
+            "due_date":         self.due_date.isoformat(),
         }
 
     def __str__(self) -> str:
@@ -53,7 +73,7 @@ class Task:
         return (
             f"[P{self.priority}] {self.name} ({self.category})"
             f" — {self.duration_minutes} min{time_str}"
-            f" | repeats: {self.recurrence}"
+            f" | repeats: {self.recurrence} | due: {self.due_date}"
         )
 
 
@@ -91,6 +111,25 @@ class Pet:
     def get_tasks_due_today(self) -> list:
         """Return only tasks that are due today."""
         return [t for t in self.tasks if t.is_due_today()]
+
+    def mark_task_complete(self, task_name: str) -> Optional["Task"]:
+        """
+        Mark a task as complete by name.
+        For recurring tasks (daily/weekly), automatically appends a new
+        instance due on the next occurrence using timedelta.
+        Returns the next Task if one was created, else None.
+        """
+        for task in self.tasks:
+            if task.name.lower() == task_name.lower() and not task.completed:
+                task.completed = True
+                if task.recurrence != "none":
+                    next_task = task.next_occurrence()
+                    self.tasks.append(next_task)
+                    return next_task
+                return None
+        raise ValueError(
+            f"No incomplete task named '{task_name}' found for {self.name}."
+        )
 
     def __str__(self) -> str:
         return (
@@ -172,8 +211,9 @@ class Scheduler:
 
     def __init__(self, owner: Owner):
         self.owner = owner
-        self.scheduled_tasks: list = []   # (pet_name, Task)
-        self._dropped_tasks:  list = []   # tasks that didn't fit
+        self.scheduled_tasks: list   = []   # (pet_name, Task)
+        self._dropped_tasks:  list   = []   # tasks that didn't fit
+        self.conflict_warnings: list = []   # overlap warnings from detect_conflicts
 
     def _get_due_tasks(self) -> list:
         """Collect all tasks due today across every pet."""
@@ -185,16 +225,94 @@ class Scheduler:
 
     def sort_by_priority(self, tasks: list) -> list:
         """
-        Sort (pet_name, Task) pairs:
-          primary   — priority descending (5 = most urgent)
-          secondary — preferred_time ascending (earlier = sooner), None goes last
+        Sort (pet_name, Task) pairs by priority descending, then preferred_time
+        ascending as a tiebreaker. Uses a tuple lambda key — same pattern as
+        sort_by_time — so both methods are visually consistent.
+        None times use sentinel '99:99' so they sort to the end.
         """
-        def sort_key(pair):
-            _, task = pair
-            time_val = task.preferred_time or "99:99"
-            return (-task.priority, time_val)
+        return sorted(
+            tasks,
+            key=lambda pair: (-pair[1].priority, pair[1].preferred_time or "99:99")
+        )
 
-        return sorted(tasks, key=sort_key)
+    def sort_by_time(self, tasks: list) -> list:
+        """
+        Sort (pet_name, Task) pairs chronologically by preferred_time (HH:MM).
+        Tasks with no preferred_time are placed at the end.
+        Uses a lambda with a sentinel value so None sorts last naturally.
+        """
+        return sorted(
+            tasks,
+            key=lambda pair: pair[1].preferred_time or "99:99"
+        )
+
+    @staticmethod
+    def _to_minutes(time_str: str) -> int:
+        """Convert 'HH:MM' string to minutes since midnight (e.g. '08:30' → 510)."""
+        h, m = map(int, time_str.split(":"))
+        return h * 60 + m
+
+    def detect_conflicts(self, tasks: list) -> list[str]:
+        """
+        Lightweight overlap detection — returns warning strings instead of crashing.
+        Strategy: convert each task to a (start, end) interval in minutes-since-
+        midnight, then check every pair using the overlap formula:
+            start_A < end_B  AND  start_B < end_A
+        Tasks without a preferred_time are skipped (no fixed start = no conflict).
+        Returns a list of human-readable warning messages (empty = no conflicts).
+        """
+        warnings = []
+
+        # Build interval list — only tasks that have a preferred_time
+        intervals = []
+        for pet_name, task in tasks:
+            if task.preferred_time is None:
+                continue
+            start = self._to_minutes(task.preferred_time)
+            end   = start + task.duration_minutes
+            intervals.append((pet_name, task, start, end))
+
+        # Check every unique pair (i, j) — O(n²) is fine for daily task counts
+        for i in range(len(intervals)):
+            for j in range(i + 1, len(intervals)):
+                pet_a, task_a, start_a, end_a = intervals[i]
+                pet_b, task_b, start_b, end_b = intervals[j]
+
+                if start_a < end_b and start_b < end_a:
+                    warnings.append(
+                        f"⚠️  Conflict: [{pet_a}] '{task_a.name}' "
+                        f"({task_a.preferred_time}, {task_a.duration_minutes} min) "
+                        f"overlaps with [{pet_b}] '{task_b.name}' "
+                        f"({task_b.preferred_time}, {task_b.duration_minutes} min)"
+                    )
+
+        return warnings
+
+    def filter_tasks(
+        self,
+        pet_name: str = None,
+        category: str = None,
+        completed: bool = None,
+    ) -> list:
+        """
+        Filter all tasks across owner's pets by any combination of:
+          pet_name  — exact match (case-insensitive)
+          category  — e.g. 'walk', 'feeding', 'medication'
+          completed — True / False
+        Returns a flat list of (pet_name, Task) tuples.
+        """
+        results = []
+        for pet in self.owner.get_pets():
+            # Skip this pet entirely if a pet_name filter is active
+            if pet_name and pet.name.lower() != pet_name.lower():
+                continue
+            for task in pet.get_tasks():
+                if category and task.category.lower() != category.lower():
+                    continue
+                if completed is not None and task.completed != completed:
+                    continue
+                results.append((pet.name, task))
+        return results
 
     def check_conflicts(self, tasks: list) -> list:
         """
@@ -220,14 +338,17 @@ class Scheduler:
         """
         Full pipeline:
           1. Collect tasks due today
-          2. Sort by priority (and preferred_time)
-          3. Fit within time budget
-          4. Store and return the final plan
+          2. Detect and store time-overlap conflicts (warnings only — no crash)
+          3. Sort by priority (and preferred_time tiebreaker)
+          4. Fit within time budget
+          5. Re-sort accepted tasks chronologically by preferred_time
+          6. Store and return the final plan
         """
-        due      = self._get_due_tasks()
-        sorted_  = self.sort_by_priority(due)
-        accepted = self.check_conflicts(sorted_)
-        self.scheduled_tasks = accepted
+        due                   = self._get_due_tasks()
+        self.conflict_warnings = self.detect_conflicts(due)   # stored for explain_plan
+        by_prio               = self.sort_by_priority(due)
+        accepted              = self.check_conflicts(by_prio)
+        self.scheduled_tasks  = self.sort_by_time(accepted)
         return self.scheduled_tasks
 
     def explain_plan(self) -> str:
@@ -266,5 +387,14 @@ class Scheduler:
             )
         else:
             lines.append("\n  All due tasks fit within today's time budget.")
+
+        if self.conflict_warnings:
+            lines += ["", "TIME CONFLICTS DETECTED:"]
+            for w in self.conflict_warnings:
+                lines.append(f"  {w}")
+            lines.append(
+                "\n  Note: conflicting tasks are still scheduled — "
+                "consider adjusting their preferred_time or duration."
+            )
 
         return "\n".join(lines)

@@ -22,6 +22,18 @@ Your final app should:
 - Display the plan clearly (and ideally explain the reasoning)
 - Include tests for the most important scheduling behaviors
 
+Smarter Scheduling
+
+PawPal+ goes beyond a simple task list with four algorithmic features:
+
+Sorting — Tasks are first ranked by priority (1–5) to decide which ones make the cut, then re-sorted chronologically by preferred time so the final plan reads like a real day (07:30 walk → 08:00 breakfast → 18:00 walk).
+
+Filtering — Any view of tasks can be filtered by pet name, category (walk, feeding, medication, grooming, enrichment), or completion status. Filters can be combined (e.g. Buddy's incomplete medication tasks only).
+
+Recurring tasks — Each task carries a due_date. When a daily or weekly task is marked complete, a new instance is automatically created for the next occurrence using timedelta (daily → +1 day, weekly → +7 days). One-time tasks are simply marked done with no follow-up.
+
+Conflict detection — The scheduler checks every pair of scheduled tasks for time overlap using start/end intervals in minutes-since-midnight. Conflicts surface as warning messages rather than silent drops or crashes, keeping the owner informed without overriding their data.
+
 ## Getting started
 
 ### Setup
