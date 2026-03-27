@@ -45,13 +45,15 @@ The conflict detector warns about overlapping tasks but does not remove them. Th
 
 **a. How you used AI**
 
-- How did you use AI tools during this project (for example: design brainstorming, debugging, refactoring)?
-- What kinds of prompts or questions were most helpful?
+AI was used across every phase: brainstorming class responsibilities in Phase 1, generating method stubs and docstrings in Phase 2, suggesting algorithmic approaches (timedelta for recurrence, interval math for conflict detection) in Phase 4, and drafting test cases in Phase 5.
+
+The most effective prompts were specific and file-anchored — asking "based on this skeleton, how should Scheduler retrieve tasks from Owner?" produced a concrete, usable answer. Vague prompts like "help me with scheduling" did not. Using #file: references kept AI suggestions grounded in the actual code rather than generic patterns.
 
 **b. Judgment and verification**
 
-- Describe one moment where you did not accept an AI suggestion as-is.
-- How did you evaluate or verify what the AI suggested?
+In Phase 4 Step 5, AI suggested replacing the nested loop in detect_conflicts with itertools.combinations. The suggestion was valid Python but was rejected because the explicit range(len) loop makes the O(n²) complexity visible to future maintainers — a readability advantage that outweighs the marginal conciseness gain. The decision was evaluated by asking: does this change make the code clearer to a reader who hasn't seen it before? The answer was no.
+
+A second example: in Phase 5, AI generated a test asserting that calling mark_task_complete twice on the same task name should raise a ValueError. After running the suite, that test failed — not because the code was broken, but because the assumption was wrong. The first call creates a clone with the same name, so the second call completes the clone, which is correct behavior. The test was rewritten to assert that two completions produce two completed tasks.
 
 ---
 
@@ -59,13 +61,13 @@ The conflict detector warns about overlapping tasks but does not remove them. Th
 
 **a. What you tested**
 
-- What behaviors did you test?
-- Why were these tests important?
+23 tests across five groups: sorting correctness (chronological order, priority order), recurrence logic (daily/weekly next occurrence dates, clone creation), conflict detection (overlap caught, adjacent tasks safe, cross-pet detection), filtering (by pet name, category, completion status), and budget enforcement (tasks dropped when budget exceeded, empty pet graceful).
+
+These behaviors were chosen because they represent the scheduler's core guarantees — if any of them break silently, the owner gets a wrong plan with no indication of the error.
 
 **b. Confidence**
 
-- How confident are you that your scheduler works correctly?
-- What edge cases would you test next if you had more time?
+⭐⭐⭐⭐☆ (4/5). Core scheduling logic is well covered. The UI layer (app.py session state behavior) and malformed input edge cases (e.g. "8:00" instead of "08:00" in preferred_time) are untested. Those would be the next targets.
 
 ---
 
@@ -73,12 +75,12 @@ The conflict detector warns about overlapping tasks but does not remove them. Th
 
 **a. What went well**
 
-- What part of this project are you most satisfied with?
+The CLI-first workflow was the most valuable structural decision. Having main.py as a verification layer meant every algorithm was confirmed working before touching the UI. Bugs were caught in isolation rather than tangled with Streamlit's rerun behavior.
 
 **b. What you would improve**
 
-- If you had another iteration, what would you improve or redesign?
+The preferred_time field is a plain string with no validation. A malformed entry like "8:00" or "8am" would silently break sort_by_time and detect_conflicts. In the next iteration I would add a validator on Task creation and surface a clear error in the UI rather than letting it fail downstream.
 
 **c. Key takeaway**
 
-- What is one important thing you learned about designing systems or working with AI on this project?
+The lead architect role means deciding what AI suggestions to accept, modify, or reject — not just accepting whatever is generated. AI accelerated every phase of this project, but every structural decision (Scheduler takes Owner directly, conflict detection warns rather than drops, explicit loop over itertools) required a human judgment call that AI could not make on its own. The quality of the final system reflects those decisions more than the speed at which the code was produced.
