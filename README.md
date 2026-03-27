@@ -214,3 +214,54 @@ Every task in the schedule display is color-coded:
  
 The task table also shows emoji priority labels (🔴🟠🟡🟢⚪) on every row
 so priority is visible before a schedule is even generated.
+
+## 🎨 Challenge 4: Professional UI and Output Formatting
+ 
+PawPal+ has two distinct polished interfaces — a Streamlit web UI and a formatted CLI via `main.py`.
+ 
+### CLI formatting (`main.py`)
+ 
+Install the one extra dependency:
+ 
+```bash
+pip install tabulate
+```
+ 
+Then run:
+ 
+```bash
+python main.py
+```
+ 
+**What you'll see:**
+ 
+| Feature | Detail |
+|---|---|
+| Bordered header | `╔══╗` box with owner name |
+| Progress bar | `[██████░░░░░░░░░░░░░]` showing minutes used vs available |
+| `tabulate` schedule table | `rounded_outline` style with bold times |
+| ANSI color priority | 🔴 red · 🟠 yellow · 🟡 yellow · 🟢 green · ⚪ dim |
+| Category emojis | 🦮 walk · 🍖 feeding · 💊 medication · ✂️ grooming · 🧩 enrichment |
+| Completion checkmarks | `✓ done` in green · `· pending` in dim |
+| Urgency score column | Weighted score shown alongside each task |
+| Conflict warnings | `⚠` in red with overlapping task details |
+| Next slot finder | Prints earliest open window for 10, 30, 60-min tasks |
+ 
+### Streamlit UI formatting (`app.py`)
+ 
+| Feature | Component used |
+|---|---|
+| Per-task color cards | `st.success` (clean) · `st.warning` (conflict) · `st.error` (dropped) |
+| Emoji priority labels | 🔴🟠🟡🟢⚪ in task table and schedule display |
+| Urgency score column | Computed live from `weighted_score()` in task table |
+| Priority legend | Collapsible expander explaining each level |
+| Conflict banner | `st.error` at top + per-conflict `st.warning` with task details |
+| Metrics row | Available · Scheduled · Tasks · Conflicts counts |
+| Next slot hint | Caption below schedule showing first free 30-min window |
+| Save confirmation | `st.toast` on session restore · caption on auto-save |
+ 
+### Design principle
+ 
+Both interfaces follow the same rule: **severity determines color**.
+Green = good, yellow = needs attention, red = action required.
+This applies equally to the ANSI terminal output and the Streamlit components.
