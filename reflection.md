@@ -20,8 +20,12 @@ The three core user actions are:
 
 **b. Design changes**
 
-- Did your design change during implementation?
-- If yes, describe at least one change and why you made it.
+After reviewing the skeleton with AI, two potential gaps were identified:
+1. **Scheduler has no direct reference to Owner** — available_minutes is passed in manually, but Owner already holds available_hours as a string (e.g."07:00-21:00"). A cleaner design would pass Owner into Scheduler directly and parse the hours automatically. For now, manual passing keeps Scheduler simple and independently testable.
+
+2. **No Task unique ID** — tasks are identified only by name, meaning two tasks with the same name could cause silent bugs in remove_task(). Adding a short UUID or auto-increment ID would make removal safer. This is noted as a Phase 3 improvement once logic is implemented.
+
+Both changes were deferred to avoid over-engineering the skeleton before any logic exists.
 
 ---
 
