@@ -34,6 +34,39 @@ Recurring tasks — Each task carries a due_date. When a daily or weekly task is
 
 Conflict detection — The scheduler checks every pair of scheduled tasks for time overlap using start/end intervals in minutes-since-midnight. Conflicts surface as warning messages rather than silent drops or crashes, keeping the owner informed without overriding their data.
 
+## Testing PawPal+
+ 
+### Run the tests
+ 
+```bash
+python -m pytest
+```
+ 
+Or for verbose output showing each test name:
+ 
+```bash
+python -m pytest tests/test_pawpal.py -v
+```
+ 
+### What the tests cover
+ 
+| Group | Count | What's verified |
+|---|---|---|
+| Sorting | 4 | Chronological order, None times last, priority order, final plan order |
+| Recurrence | 7 | Daily/weekly next occurrence dates, mark complete, clone creation, unique IDs |
+| Conflict detection | 5 | Overlap caught, adjacent tasks safe, None time safe, cross-pet, explain_plan output |
+| Filtering | 3 | Pet name filter, nonexistent pet, completed=False |
+| Budget enforcement | 3 | All exceed budget, low priority dropped, empty pet |
+ 
+**Total: 23 tests**
+ 
+### Confidence level ⭐⭐⭐⭐☆ (4/5)
+ 
+Core scheduling behaviors — priority sorting, recurrence, conflict detection,
+and budget enforcement — are well covered. One star deducted because the UI
+layer (`app.py`) and session state behavior are not yet tested, and edge cases
+around malformed time strings (e.g. `"8:00"` instead of `"08:00"`) are untested.
+
 ## Getting started
 
 ### Setup

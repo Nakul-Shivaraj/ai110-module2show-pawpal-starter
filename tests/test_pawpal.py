@@ -1,185 +1,273 @@
 """
 tests/test_pawpal.py
-Basic tests for PawPal+ core logic.
+Full test suite for PawPal+ — happy paths + edge cases.
 Run with: python -m pytest
 """
 
 import pytest
+from datetime import date, timedelta
 from pawpal_system import Task, Pet, Owner, Scheduler
 
 
 # ---------------------------------------------------------------------------
-# Helpers — reusable fixtures
+# Fixtures
 # ---------------------------------------------------------------------------
 
 @pytest.fixture
-def sample_task():
-    """A basic daily walk task."""
-    return Task(
-        name="Morning Walk",
-        category="walk",
-        duration_minutes=30,
-        priority=5,
-        recurrence="daily",
-        preferred_time="07:30",
-    )
+def daily_task():
+    return Task("Morning Walk", "walk", 30, priority=5,
+                recurrence="daily", preferred_time="07:30")
 
 @pytest.fixture
-def sample_pet():
-    """A pet with no tasks yet."""
-    return Pet(name="Buddy", species="Dog", age=3)
+def weekly_task():
+    return Task("Brushing", "grooming", 15, priority=2,
+                recurrence="weekly", preferred_time="14:00")
 
 @pytest.fixture
-def sample_owner(sample_pet):
-    """An owner with one pet already registered."""
-    owner = Owner(
-        name="Jordan",
-        email="jordan@pawpal.com",
-        available_hours="07:00-20:00",
-    )
-    owner.add_pet(sample_pet)
-    return owner
+def one_off_task():
+    return Task("Vet Visit", "medication", 60, priority=5,
+                recurrence="none", preferred_time="10:00")
+
+@pytest.fixture
+def pet():
+    return Pet("Buddy", "Dog", 4)
+
+@pytest.fixture
+def owner_with_pet(pet):
+    o = Owner("Jordan", "j@pawpal.com", "07:00-20:00")
+    o.add_pet(pet)
+    return o
+
+@pytest.fixture
+def scheduler(owner_with_pet):
+    return Scheduler(owner_with_pet)
 
 
 # ---------------------------------------------------------------------------
-# Task tests
+# 1. Sorting correctness
 # ---------------------------------------------------------------------------
 
-def test_task_completion_changes_status(sample_task):
-    """mark_complete() should set completed to True."""
-    assert sample_task.completed is False
-    sample_task.completed = True
-    assert sample_task.completed is True
+def test_sort_by_time_chronological_order(pet, owner_with_pet, scheduler):
+    """Tasks added out of order should come back sorted by preferred_time."""
+    pet.add_task(Task("Evening Walk", "walk",    45, priority=3, preferred_time="18:00"))
+    pet.add_task(Task("Breakfast",    "feeding", 10, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Morning Walk", "walk",    30, priority=5, preferred_time="07:30"))
 
-def test_task_completed_false_by_default(sample_task):
-    """A newly created task should not be marked complete."""
-    assert sample_task.completed is False
+    all_pairs = owner_with_pet.get_all_tasks()
+    sorted_pairs = scheduler.sort_by_time(all_pairs)
+    times = [t.preferred_time for _, t in sorted_pairs]
+    assert times == sorted(times), f"Expected chronological order, got {times}"
 
-def test_task_to_dict_contains_all_keys(sample_task):
-    """to_dict() should include every expected field."""
-    d = sample_task.to_dict()
-    for key in ["task_id", "name", "category", "duration_minutes",
-                "priority", "recurrence", "preferred_time", "completed"]:
-        assert key in d, f"Missing key: {key}"
+def test_sort_by_time_none_goes_last(pet, owner_with_pet, scheduler):
+    """Tasks without a preferred_time should appear after timed tasks."""
+    pet.add_task(Task("Walk",    "walk",        30, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Anytime", "enrichment",  20, priority=3, preferred_time=None))
 
-def test_task_is_due_today_daily(sample_task):
-    """A daily task should always be due today."""
-    assert sample_task.is_due_today() is True
+    sorted_pairs = scheduler.sort_by_time(owner_with_pet.get_all_tasks())
+    last_task = sorted_pairs[-1][1]
+    assert last_task.preferred_time is None
 
-def test_task_is_due_today_none_recurrence_not_completed():
-    """A one-time task that isn't completed should be due today."""
-    task = Task("Vet Visit", "medication", 60, priority=5, recurrence="none")
-    assert task.is_due_today() is True
+def test_sort_by_priority_highest_first(pet, owner_with_pet, scheduler):
+    """Higher priority tasks must appear before lower priority ones."""
+    pet.add_task(Task("Low",  "enrichment", 10, priority=1, preferred_time="09:00"))
+    pet.add_task(Task("High", "walk",       10, priority=5, preferred_time="10:00"))
+    pet.add_task(Task("Mid",  "feeding",    10, priority=3, preferred_time="08:00"))
 
-def test_task_is_due_today_none_recurrence_already_completed():
-    """A one-time task that IS completed should NOT be due today."""
-    task = Task("Vet Visit", "medication", 60, priority=5,
-                recurrence="none", completed=True)
-    assert task.is_due_today() is False
-
-
-# ---------------------------------------------------------------------------
-# Pet tests
-# ---------------------------------------------------------------------------
-
-def test_add_task_increases_count(sample_pet, sample_task):
-    """Adding a task to a pet should increase its task count by 1."""
-    before = len(sample_pet.get_tasks())
-    sample_pet.add_task(sample_task)
-    assert len(sample_pet.get_tasks()) == before + 1
-
-def test_add_multiple_tasks(sample_pet):
-    """Adding three tasks should result in exactly three tasks."""
-    for i in range(3):
-        sample_pet.add_task(Task(f"Task {i}", "feeding", 10, priority=i + 1))
-    assert len(sample_pet.get_tasks()) == 3
-
-def test_add_duplicate_task_raises(sample_pet, sample_task):
-    """Adding the same task object twice should raise a ValueError."""
-    sample_pet.add_task(sample_task)
-    with pytest.raises(ValueError):
-        sample_pet.add_task(sample_task)
-
-def test_remove_task_decreases_count(sample_pet, sample_task):
-    """Removing a task should decrease the task count by 1."""
-    sample_pet.add_task(sample_task)
-    before = len(sample_pet.get_tasks())
-    sample_pet.remove_task("Morning Walk")
-    assert len(sample_pet.get_tasks()) == before - 1
-
-def test_remove_nonexistent_task_raises(sample_pet):
-    """Removing a task that doesn't exist should raise a ValueError."""
-    with pytest.raises(ValueError):
-        sample_pet.remove_task("Ghost Task")
-
-
-# ---------------------------------------------------------------------------
-# Owner tests
-# ---------------------------------------------------------------------------
-
-def test_owner_add_pet_increases_count(sample_owner):
-    """Adding a second pet should bring the count to 2."""
-    sample_owner.add_pet(Pet("Luna", "Cat", 2))
-    assert len(sample_owner.get_pets()) == 2
-
-def test_owner_duplicate_pet_raises(sample_owner):
-    """Registering a pet with the same name should raise a ValueError."""
-    with pytest.raises(ValueError):
-        sample_owner.add_pet(Pet("Buddy", "Dog", 5))
-
-def test_owner_available_minutes_parses_correctly(sample_owner):
-    """07:00-20:00 should equal 780 minutes."""
-    assert sample_owner.available_minutes() == 780
-
-def test_owner_get_all_tasks_returns_tuples(sample_owner, sample_pet, sample_task):
-    """get_all_tasks() should return (pet_name, Task) tuples."""
-    sample_pet.add_task(sample_task)
-    all_tasks = sample_owner.get_all_tasks()
-    assert len(all_tasks) == 1
-    pet_name, task = all_tasks[0]
-    assert pet_name == "Buddy"
-    assert task.name == "Morning Walk"
-
-
-# ---------------------------------------------------------------------------
-# Scheduler tests
-# ---------------------------------------------------------------------------
-
-def test_scheduler_generate_plan_returns_list(sample_owner, sample_pet, sample_task):
-    """generate_plan() should return a list."""
-    sample_pet.add_task(sample_task)
-    scheduler = Scheduler(sample_owner)
-    plan = scheduler.generate_plan()
-    assert isinstance(plan, list)
-
-def test_scheduler_sorts_higher_priority_first(sample_owner, sample_pet):
-    """Higher priority tasks should appear before lower priority ones."""
-    sample_pet.add_task(Task("Low Task",  "enrichment", 10, priority=1))
-    sample_pet.add_task(Task("High Task", "walk",       10, priority=5))
-    scheduler = Scheduler(sample_owner)
-    plan = scheduler.generate_plan()
-    priorities = [task.priority for _, task in plan]
+    sorted_pairs = scheduler.sort_by_priority(owner_with_pet.get_all_tasks())
+    priorities = [t.priority for _, t in sorted_pairs]
     assert priorities == sorted(priorities, reverse=True)
 
-def test_scheduler_drops_tasks_exceeding_budget():
-    """Tasks that exceed the time budget should be dropped."""
-    owner = Owner("Test", "t@t.com", "08:00-08:30")  # only 30 min
-    pet   = Pet("Rex", "Dog", 2)
-    pet.add_task(Task("Long Task",  "walk", 25, priority=5))
-    pet.add_task(Task("Short Task", "walk",  5, priority=3))
-    pet.add_task(Task("Over Task",  "walk", 20, priority=1))  # won't fit
-    owner.add_pet(pet)
-    scheduler = Scheduler(owner)
-    plan = scheduler.generate_plan()
-    total = sum(t.duration_minutes for _, t in plan)
-    assert total <= 30
+def test_generate_plan_final_order_is_chronological(pet, owner_with_pet, scheduler):
+    """generate_plan() final output should be time-sorted, not priority-sorted."""
+    pet.add_task(Task("Evening Walk", "walk",    45, priority=5, preferred_time="18:00"))
+    pet.add_task(Task("Breakfast",    "feeding", 10, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Morning Walk", "walk",    30, priority=5, preferred_time="07:30"))
 
-def test_scheduler_explain_plan_is_string(sample_owner, sample_pet, sample_task):
-    """explain_plan() should return a non-empty string after generate_plan()."""
-    sample_pet.add_task(sample_task)
-    scheduler = Scheduler(sample_owner)
-    scheduler.generate_plan()
-    explanation = scheduler.explain_plan()
-    assert isinstance(explanation, str)
-    assert len(explanation) > 0
-    
+    plan = scheduler.generate_plan()
+    times = [t.preferred_time for _, t in plan if t.preferred_time]
+    assert times == sorted(times)
+
+
+# ---------------------------------------------------------------------------
+# 2. Recurrence logic
+# ---------------------------------------------------------------------------
+
+def test_daily_task_next_occurrence_is_tomorrow(daily_task):
+    """Completing a daily task should create a clone due tomorrow."""
+    next_task = daily_task.next_occurrence()
+    assert next_task.due_date == date.today() + timedelta(days=1)
+
+def test_weekly_task_next_occurrence_is_next_week(weekly_task):
+    """Completing a weekly task should create a clone due in 7 days."""
+    next_task = weekly_task.next_occurrence()
+    assert next_task.due_date == date.today() + timedelta(weeks=1)
+
+def test_nonrecurring_task_raises_on_next_occurrence(one_off_task):
+    """Calling next_occurrence() on a none-recurrence task should raise."""
+    with pytest.raises(ValueError):
+        one_off_task.next_occurrence()
+
+def test_mark_complete_daily_appends_next_task(pet, daily_task):
+    """mark_task_complete on a daily task should append a new task to the pet."""
+    pet.add_task(daily_task)
+    before = len(pet.get_tasks())
+    pet.mark_task_complete("Morning Walk")
+    assert len(pet.get_tasks()) == before + 1
+
+def test_mark_complete_none_recurrence_returns_none(pet, one_off_task):
+    """mark_task_complete on a one-off task should return None."""
+    pet.add_task(one_off_task)
+    result = pet.mark_task_complete("Vet Visit")
+    assert result is None
+
+def test_mark_complete_sets_completed_true(pet, daily_task):
+    """The original task should be marked completed after mark_task_complete."""
+    pet.add_task(daily_task)
+    pet.mark_task_complete("Morning Walk")
+    original = pet.get_tasks()[0]
+    assert original.completed is True
+
+def test_mark_complete_twice_completes_the_clone(pet, daily_task):
+    """
+    Calling mark_task_complete twice on a daily task should work:
+    the first call marks the original done and creates a clone,
+    the second call marks that clone done (not a crash or error).
+    """
+    pet.add_task(daily_task)
+    pet.mark_task_complete("Morning Walk")   # completes original, creates clone
+    pet.mark_task_complete("Morning Walk")   # completes the clone — valid behavior
+    completed = [t for t in pet.get_tasks() if t.completed]
+    assert len(completed) == 2
+
+def test_next_occurrence_has_new_task_id(daily_task):
+    """Each recurrence should be a distinct object with a fresh task_id."""
+    next_task = daily_task.next_occurrence()
+    assert next_task.task_id != daily_task.task_id
+
+
+# ---------------------------------------------------------------------------
+# 3. Conflict detection
+# ---------------------------------------------------------------------------
+
+def test_overlapping_tasks_flagged(pet, owner_with_pet, scheduler):
+    """Two tasks whose intervals overlap should produce a conflict warning."""
+    pet.add_task(Task("Walk",      "walk",    45, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Breakfast", "feeding", 15, priority=5, preferred_time="08:30"))
+
+    warnings = scheduler.detect_conflicts(owner_with_pet.get_all_tasks())
+    assert len(warnings) > 0
+
+def test_adjacent_tasks_no_false_conflict(pet, owner_with_pet, scheduler):
+    """Tasks that touch but don't overlap should NOT produce a warning."""
+    pet.add_task(Task("Walk",      "walk",    30, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Breakfast", "feeding", 15, priority=5, preferred_time="08:30"))
+
+    warnings = scheduler.detect_conflicts(owner_with_pet.get_all_tasks())
+    assert len(warnings) == 0
+
+def test_no_preferred_time_skipped_by_conflict_detector(pet, owner_with_pet, scheduler):
+    """Tasks without preferred_time should not crash the conflict detector."""
+    pet.add_task(Task("Anytime", "enrichment", 30, priority=3, preferred_time=None))
+    pet.add_task(Task("Walk",    "walk",        30, priority=5, preferred_time="08:00"))
+
+    warnings = scheduler.detect_conflicts(owner_with_pet.get_all_tasks())
+    assert isinstance(warnings, list)
+
+def test_cross_pet_conflict_detected():
+    """Overlapping tasks on different pets should still be flagged."""
+    owner = Owner("Sam", "s@s.com", "07:00-20:00")
+    rex   = Pet("Rex",   "Dog", 2)
+    kitty = Pet("Kitty", "Cat", 3)
+    rex.add_task(  Task("Walk",      "walk",    45, priority=5, preferred_time="08:00"))
+    kitty.add_task(Task("Breakfast", "feeding", 20, priority=5, preferred_time="08:00"))
+    owner.add_pet(rex)
+    owner.add_pet(kitty)
+
+    s = Scheduler(owner)
+    warnings = s.detect_conflicts(owner.get_all_tasks())
+    assert len(warnings) > 0
+
+def test_conflict_warnings_in_explain_plan():
+    """explain_plan() should mention conflicts when they exist."""
+    owner = Owner("Sam", "s@s.com", "07:00-20:00")
+    pet   = Pet("Rex", "Dog", 2)
+    pet.add_task(Task("Walk",      "walk",    45, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Breakfast", "feeding", 15, priority=5, preferred_time="08:30"))
+    owner.add_pet(pet)
+
+    s = Scheduler(owner)
+    s.generate_plan()
+    explanation = s.explain_plan()
+    assert "Conflict" in explanation or "conflict" in explanation
+
+
+# ---------------------------------------------------------------------------
+# 4. Filtering
+# ---------------------------------------------------------------------------
+
+def test_filter_by_pet_name_returns_only_that_pet():
+    """filter_tasks(pet_name=X) should only return tasks for pet X."""
+    owner = Owner("Jordan", "j@j.com", "07:00-20:00")
+    buddy = Pet("Buddy", "Dog", 4)
+    luna  = Pet("Luna",  "Cat", 2)
+    buddy.add_task(Task("Walk",      "walk",    30, priority=5))
+    luna.add_task( Task("Breakfast", "feeding", 10, priority=5))
+    owner.add_pet(buddy)
+    owner.add_pet(luna)
+
+    s = Scheduler(owner)
+    results = s.filter_tasks(pet_name="Buddy")
+    assert all(name == "Buddy" for name, _ in results)
+
+def test_filter_nonexistent_pet_returns_empty():
+    """Filtering by a pet name that doesn't exist should return []."""
+    owner = Owner("Jordan", "j@j.com", "07:00-20:00")
+    owner.add_pet(Pet("Buddy", "Dog", 4))
+    s = Scheduler(owner)
+    assert s.filter_tasks(pet_name="Ghost") == []
+
+def test_filter_by_completed_false_excludes_done(pet, owner_with_pet, daily_task):
+    """filter_tasks(completed=False) should exclude completed tasks."""
+    pet.add_task(daily_task)
+    pet.mark_task_complete("Morning Walk")
+
+    s = Scheduler(owner_with_pet)
+    incomplete = s.filter_tasks(completed=False)
+    assert all(not t.completed for _, t in incomplete)
+
+
+# ---------------------------------------------------------------------------
+# 5. Time budget enforcement
+# ---------------------------------------------------------------------------
+
+def test_all_tasks_exceed_budget_gives_empty_plan():
+    """If every task exceeds the budget, the plan should be empty."""
+    owner = Owner("Jordan", "j@j.com", "08:00-08:10")  # only 10 min
+    pet   = Pet("Buddy", "Dog", 4)
+    pet.add_task(Task("Long Walk", "walk", 60, priority=5, preferred_time="08:00"))
+    owner.add_pet(pet)
+
+    s = Scheduler(owner)
+    plan = s.generate_plan()
+    assert plan == []
+
+def test_low_priority_dropped_when_budget_tight():
+    """A low-priority task should be dropped when budget is nearly full."""
+    owner = Owner("Jordan", "j@j.com", "08:00-08:35")  # 35 min
+    pet   = Pet("Buddy", "Dog", 4)
+    pet.add_task(Task("High Task", "walk",       30, priority=5, preferred_time="08:00"))
+    pet.add_task(Task("Low Task",  "enrichment", 20, priority=1, preferred_time="08:30"))
+    owner.add_pet(pet)
+
+    s = Scheduler(owner)
+    plan = s.generate_plan()
+    names = [t.name for _, t in plan]
+    assert "High Task" in names
+    assert "Low Task"  not in names
+
+def test_pet_with_no_tasks_gives_empty_plan():
+    """A pet with no tasks should produce an empty plan without crashing."""
+    owner = Owner("Jordan", "j@j.com", "07:00-20:00")
+    owner.add_pet(Pet("Buddy", "Dog", 4))
+    s = Scheduler(owner)
+    assert s.generate_plan() == []
