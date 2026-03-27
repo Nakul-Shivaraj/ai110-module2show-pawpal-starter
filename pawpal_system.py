@@ -398,3 +398,72 @@ class Scheduler:
             )
 
         return "\n".join(lines)
+
+    # -----------------------------------------------------------------------
+    # Extension 1: Next available slot
+    # -----------------------------------------------------------------------
+
+    def find_next_slot(self, duration_minutes: int):
+        """
+        Find the earliest open time window in today's schedule that can fit
+        a task of the given duration without conflicting with existing tasks.
+        Returns a 'HH:MM' string or None if no slot is available.
+        """
+        if not self.scheduled_tasks:
+            return self.owner.available_hours.split("-")[0].strip()
+
+        busy = []
+        for _, task in self.scheduled_tasks:
+            if task.preferred_time:
+                s = self._to_minutes(task.preferred_time)
+                busy.append((s, s + task.duration_minutes))
+
+        try:
+            start_str, end_str = self.owner.available_hours.split("-")
+            window_start = self._to_minutes(start_str.strip())
+            window_end   = self._to_minutes(end_str.strip())
+        except ValueError:
+            return None
+
+        for candidate in range(window_start, window_end - duration_minutes + 1):
+            cand_end = candidate + duration_minutes
+            if all(candidate >= b_end or cand_end <= b_start
+                   for b_start, b_end in busy):
+                h, m = divmod(candidate, 60)
+                return f"{h:02d}:{m:02d}"
+
+        return None
+
+    # -----------------------------------------------------------------------
+    # Extension 2: Weighted prioritization
+    # -----------------------------------------------------------------------
+
+    CATEGORY_WEIGHTS = {
+        "medication": 1.5,
+        "feeding":    1.3,
+        "walk":       1.2,
+        "grooming":   1.1,
+        "enrichment": 1.0,
+    }
+
+    def weighted_score(self, task) -> float:
+        """
+        Compute a composite urgency score:
+            score = priority x category_weight x recency_bonus
+        Overdue tasks get 1.5x bonus, due-today 1.0x, tomorrow 0.8x, later 0.5x.
+        """
+        from datetime import date
+        days_out = (task.due_date - date.today()).days
+        if days_out < 0:
+            recency = 1.5
+        elif days_out == 0:
+            recency = 1.0
+        elif days_out == 1:
+            recency = 0.8
+        else:
+            recency = 0.5
+        return round(task.priority * self.CATEGORY_WEIGHTS.get(task.category, 1.0) * recency, 3)
+
+    def sort_by_weighted_score(self, tasks: list) -> list:
+        """Sort (pet_name, Task) pairs by weighted_score descending."""
+        return sorted(tasks, key=lambda pair: self.weighted_score(pair[1]), reverse=True)

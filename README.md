@@ -103,3 +103,40 @@ Four core classes work together:
 - Scheduler — the planning engine: filters, sorts, checks budget, detects conflicts
 
 See uml_final.png for the full class diagram.
+
+## 🧠 Optional Extensions
+
+### Extension 1: Next available slot (`find_next_slot`)
+
+Given a task duration in minutes, the scheduler scans the owner's available window minute-by-minute and returns the earliest time that fits without overlapping any existing scheduled task.
+ 
+```python
+scheduler.generate_plan()
+slot = scheduler.find_next_slot(30)  # → "08:10"
+```
+
+**How it works:** builds a list of `(start, end)` busy intervals from the current plan, then walks from the window start checking each candidate slot against every busy interval using `candidate >= end OR candidate+dur <= start`.
+ 
+
+### Extension 2: Weighted prioritization (`weighted_score`)
+
+Produces a composite urgency float that goes beyond the raw 1–5 priority
+integer by factoring in category importance and due-date proximity:
+ 
+```
+score = priority × category_weight × recency_bonus
+```
+ 
+| Factor | Values |
+|---|---|
+| `category_weight` | medication 1.5 · feeding 1.3 · walk 1.2 · grooming 1.1 · enrichment 1.0 |
+| `recency_bonus` | overdue 1.5× · due today 1.0× · tomorrow 0.8× · later 0.5× |
+ 
+An overdue P3 medication (score 6.75) correctly outranks an on-time P5 walk
+(score 6.0) — raw priority alone would get this wrong.
+ 
+```python
+ranked = scheduler.sort_by_weighted_score(owner.get_all_tasks())
+```
+
+**Agent Mode usage:** Agent Mode was used to scaffold both methods — it proposed the interval overlap formula for `find_next_slot` and the multiplicative score structure for `weighted_score`. Both suggestions were reviewed and modified: the slot finder was changed from 30-minute increments to 1-minute steps for precision, and the recency bonus tiers were adjusted after testing showed the original values didn't differentiate overdue tasks strongly enough.
